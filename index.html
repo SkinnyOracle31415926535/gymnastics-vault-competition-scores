@@ -1414,6 +1414,68 @@
       gap: 10px;
     }
 
+    .judging-team-roster {
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      background:
+        repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.34) 0 4px, transparent 4px 12px),
+        #ccffff;
+      border: 5px ridge var(--hot-pink);
+    }
+
+    .judging-team-roster-title {
+      padding: 6px 8px;
+      color: var(--yellow);
+      background:
+        repeating-linear-gradient(90deg, #000080 0 16px, #660099 16px 32px);
+      border: 3px ridge var(--aqua);
+      font-family: "Courier New", Courier, monospace;
+      font-weight: 900;
+      text-align: center;
+      text-transform: uppercase;
+      text-shadow: 1px 1px 0 #000000;
+    }
+
+    .judging-team-roster-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 8px;
+    }
+
+    .judging-team-card {
+      display: grid;
+      gap: 6px;
+      padding: 8px;
+      background: var(--yellow);
+      border: 3px ridge var(--blue);
+    }
+
+    .judging-team-name {
+      color: #000080;
+      font-family: "Courier New", Courier, monospace;
+      font-weight: 900;
+      text-transform: uppercase;
+      overflow-wrap: anywhere;
+    }
+
+    .judging-team-members {
+      display: grid;
+      gap: 4px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      font-family: "Courier New", Courier, monospace;
+      font-weight: 900;
+    }
+
+    .judging-team-members li {
+      padding: 4px 6px;
+      background: #ffffff;
+      border: 2px solid #000000;
+      overflow-wrap: anywhere;
+    }
+
     .judge-name-card {
       min-width: 0;
       padding: 10px;
@@ -1826,6 +1888,11 @@
       </header>
       <div id="judgingEmpty" class="empty">add an athlete first</div>
       <div id="judgingPanel" class="judging-panel">
+        <section id="judgingTeamRoster" class="judging-team-roster" aria-labelledby="judgingTeamRosterTitle" hidden>
+          <div id="judgingTeamRosterTitle" class="judging-team-roster-title">teams for this round</div>
+          <div id="judgingTeamRosterGrid" class="judging-team-roster-grid" aria-live="polite"></div>
+        </section>
+
         <div class="judging-header">
           <div class="judge-name-card">
             <div class="judge-label">kid</div>
@@ -2178,6 +2245,9 @@
     const backToHomeButton = document.getElementById("backToHome");
     const judgingEmpty = document.getElementById("judgingEmpty");
     const judgingPanel = document.getElementById("judgingPanel");
+    const judgingTeamRoster = document.getElementById("judgingTeamRoster");
+    const judgingTeamRosterTitle = document.getElementById("judgingTeamRosterTitle");
+    const judgingTeamRosterGrid = document.getElementById("judgingTeamRosterGrid");
     const judgeAthleteName = document.getElementById("judgeAthleteName");
     const judgeEventName = document.getElementById("judgeEventName");
     const judgeStartValue = document.getElementById("judgeStartValue");
@@ -3544,6 +3614,55 @@
       });
     }
 
+    function renderJudgingTeamRoster(isCompetition) {
+      const shouldShow = isCompetition && isTeamScoringMode();
+      judgingTeamRoster.hidden = !shouldShow;
+      judgingTeamRosterGrid.innerHTML = "";
+      if (!shouldShow) return;
+
+      const teams = getTeamPointTeams();
+      const isShuffleMode = getTeamPointMode() === "shuffle";
+      judgingTeamRosterTitle.textContent = isShuffleMode ? "teams for this round" : "teams for this competition";
+      const assignedNames = new Set();
+
+      const appendTeamCard = (name, members, emptyText) => {
+        const card = document.createElement("section");
+        card.className = "judging-team-card";
+
+        const teamName = document.createElement("div");
+        teamName.className = "judging-team-name";
+        teamName.textContent = name;
+
+        const memberList = document.createElement("ul");
+        memberList.className = "judging-team-members";
+        if (members.length) {
+          members.forEach((member) => {
+            const item = document.createElement("li");
+            item.textContent = member;
+            memberList.appendChild(item);
+          });
+        } else {
+          const item = document.createElement("li");
+          item.textContent = emptyText;
+          memberList.appendChild(item);
+        }
+
+        card.append(teamName, memberList);
+        judgingTeamRosterGrid.appendChild(card);
+      };
+
+      teams.forEach((team, index) => {
+        const members = Array.isArray(team.members) ? team.members.filter(Boolean) : [];
+        members.forEach((member) => assignedNames.add(member));
+        appendTeamCard(team.name || "team " + (index + 1), members, "no athletes assigned");
+      });
+
+      const unassigned = state.athletes
+        .map((athlete) => athlete.name)
+        .filter((name) => !assignedNames.has(name));
+      if (unassigned.length) appendTeamCard("unassigned", unassigned, "no athletes assigned");
+    }
+
     function renderJudgingMode() {
       const isCompetition = state.competition.active;
       let athlete = null;
@@ -3569,6 +3688,7 @@
       exitJudgingModeButton.hidden = isCompetition;
       backToHomeButton.hidden = isCompetition;
       judgeEventButtons.hidden = isCompetition;
+      renderJudgingTeamRoster(isCompetition);
 
       if (isCompetition) {
         const remaining = state.competition.queue.length;
