@@ -689,7 +689,7 @@
 
     .class-profile-row {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 64px 64px;
+      grid-template-columns: minmax(0, 1fr) 64px 64px 64px;
       gap: 7px;
       align-items: center;
       padding: 7px;
@@ -698,7 +698,7 @@
     }
 
     .class-profile-row.is-built-in {
-      grid-template-columns: minmax(0, 1fr) 64px;
+      grid-template-columns: minmax(0, 1fr) 64px 64px;
       background: #ffffcc;
     }
 
@@ -1926,9 +1926,9 @@
           <div id="teamCompetitionWinner" class="team-points-summary" aria-live="polite" hidden></div>
           <div id="teamCompetitionDetail" class="team-competition-detail">build teams first</div>
           <div id="shufflePointsPanel" class="shuffle-points-panel" hidden>
-            <div class="shuffle-points-title">shuffle points</div>
+            <div class="shuffle-points-title">individual points from team wins</div>
             <div id="shufflePointsList" class="shuffle-points-list"></div>
-            <div id="shufflePointsEmpty" class="empty">no shuffle points yet</div>
+            <div id="shufflePointsEmpty" class="empty">no individual points from team wins yet</div>
           </div>
           <div class="team-randomizer-row">
             <div>
@@ -2221,6 +2221,7 @@
         scoringMode: "individual",
         date: new Date().toISOString().slice(0, 10),
         activeAthleteId: null,
+        activeClassProfileId: null,
         judgingEventId: EVENTS[0].id,
         athletes: [],
         completedEventIds: [],
@@ -2235,6 +2236,7 @@
           raw: ""
         },
         savedClasses: [],
+        builtInClassOverrides: {},
         teamPoints: {
           teamCount: 2,
           mode: "shuffle",
@@ -2437,6 +2439,27 @@
       };
     }
 
+    function normalizeBuiltInClassOverrides(overrides) {
+      const normalized = {};
+      if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return normalized;
+
+      BUILT_IN_CLASS_PROFILES.forEach((profile) => {
+        const rawOverride = overrides[profile.id];
+        if (!rawOverride || typeof rawOverride !== "object") return;
+        const athletes = uniqueNames(
+          Array.isArray(rawOverride.athletes)
+            ? rawOverride.athletes.map((athlete) => cleanText(typeof athlete === "string" ? athlete : athlete && athlete.name))
+            : []
+        );
+        normalized[profile.id] = {
+          athletes,
+          updatedAt: typeof rawOverride.updatedAt === "string" ? rawOverride.updatedAt : new Date().toISOString()
+        };
+      });
+
+      return normalized;
+    }
+
     function normalizeTeamPointTeam(rawTeam, index) {
       const fallback = "team " + (index + 1);
       if (!rawTeam || typeof rawTeam !== "object") {
@@ -2582,6 +2605,9 @@
       state.savedClasses = Array.isArray(saved.savedClasses)
         ? saved.savedClasses.map(normalizeSavedClass).filter(Boolean)
         : [];
+      state.builtInClassOverrides = normalizeBuiltInClassOverrides(saved.builtInClassOverrides);
+      const savedProfileId = typeof saved.activeClassProfileId === "string" ? saved.activeClassProfileId : "";
+      state.activeClassProfileId = getClassProfileById(savedProfileId) ? savedProfileId : null;
       state.teamPoints = {
         teamCount: saved.teamPoints && saved.teamPoints.teamCount ? normalizeTeamCount(saved.teamPoints.teamCount) : 2,
         mode: saved.teamPoints ? normalizeTeamPointMode(saved.teamPoints.mode) : "shuffle",
@@ -3246,8 +3272,8 @@
       if (highScore <= 0) return "";
       const leaders = rows.filter((row) => row.points === highScore);
       return leaders.length > 1
-        ? "shuffle points tie: " + leaders.map((row) => row.name).join(", ") + " - " + highScore
-        : "shuffle points leader: " + leaders[0].name + " - " + highScore;
+        ? "individual points tie: " + leaders.map((row) => row.name).join(", ") + " - " + highScore
+        : "individual points leader: " + leaders[0].name + " - " + highScore;
     }
 
     function getTeamCompetitionResult() {
@@ -3416,8 +3442,24 @@
       return state.savedClasses;
     }
 
+    function getBuiltInClassOverrides() {
+      if (!state.builtInClassOverrides || typeof state.builtInClassOverrides !== "object" || Array.isArray(state.builtInClassOverrides)) {
+        state.builtInClassOverrides = {};
+      }
+      return state.builtInClassOverrides;
+    }
+
     function getAllClassProfiles() {
-      return BUILT_IN_CLASS_PROFILES.concat(getSavedClasses());
+      const overrides = getBuiltInClassOverrides();
+      const builtInProfiles = BUILT_IN_CLASS_PROFILES.map((profile) => {
+        const override = overrides[profile.id];
+        return {
+          ...profile,
+          athletes: (override ? override.athletes : profile.athletes).slice(),
+          edited: Boolean(override)
+        };
+      });
+      return builtInProfiles.concat(getSavedClasses());
     }
 
     function getClassProfileById(id) {
@@ -3440,7 +3482,7 @@
         const meta = document.createElement("span");
         meta.className = "class-profile-meta";
         const count = Array.isArray(profile.athletes) ? profile.athletes.length : 0;
-        const sourceLabel = profile.builtIn ? "roll" : "saved";
+        const sourceLabel = profile.edited ? "edited roll" : profile.builtIn ? "roll" : "saved";
         meta.textContent = count + " athlete" + (count === 1 ? "" : "s") + " - " + sourceLabel;
         name.appendChild(meta);
 
@@ -3451,8 +3493,15 @@
         loadButton.dataset.classAction = "load";
         loadButton.dataset.id = profile.id;
 
+        const editButton = document.createElement("button");
+        editButton.type = "button";
+        editButton.className = "small-button secondary";
+        editButton.textContent = "edit";
+        editButton.dataset.classAction = "edit";
+        editButton.dataset.id = profile.id;
+
         if (profile.builtIn) {
-          row.append(name, loadButton);
+          row.append(name, loadButton, editButton);
           classProfileList.appendChild(row);
           return;
         }
@@ -3464,7 +3513,7 @@
         deleteButton.dataset.classAction = "delete";
         deleteButton.dataset.id = profile.id;
 
-        row.append(name, loadButton, deleteButton);
+        row.append(name, loadButton, editButton, deleteButton);
         classProfileList.appendChild(row);
       });
     }
@@ -3871,7 +3920,7 @@
       teamCompetitionDetail.textContent = isShuffleMode
         ? latestShuffleWin
           ? latestShuffleWin.eventLabel + " points awarded: " + latestShuffleWin.awardedNames.join(", ")
-          : "shuffle mode: every kid on the winning team gets 1 point for that event"
+          : "When a team wins an event, every athlete on that team earns 1 point."
         : competitionResult.detailText;
       teamPointsGrid.innerHTML = "";
       const readyTotals = new Map((competitionResult && competitionResult.ready ? competitionResult.teams : []).map((team) => [team.id, team.total]));
@@ -4451,8 +4500,10 @@
       resetClassButton.textContent = "reset class";
       window.clearTimeout(resetClassTimer);
       const savedClasses = getSavedClasses();
+      const builtInClassOverrides = getBuiltInClassOverrides();
       state = createDefaultState();
       state.savedClasses = savedClasses;
+      state.builtInClassOverrides = builtInClassOverrides;
       syncInputsFromState();
       save();
       updateAll();
@@ -4460,6 +4511,7 @@
     }
 
     function resetCurrentClassRoster() {
+      state.activeClassProfileId = null;
       state.className = "";
       state.activeAthleteId = null;
       state.athletes = [];
@@ -4483,7 +4535,8 @@
     }
 
     function saveClassProfile() {
-      let name = cleanText(classNameInput.value || state.className);
+      const activeProfile = state.activeClassProfileId ? getClassProfileById(state.activeClassProfileId) : null;
+      let name = cleanText(classNameInput.value || state.className || activeProfile?.name);
       if (!name) {
         const answer = window.prompt("Class name", "New class");
         if (answer === null) {
@@ -4499,8 +4552,23 @@
       state.className = name;
       classNameInput.value = name;
       const athleteNames = state.athletes.map((athlete) => athlete.name).filter(Boolean);
+      if (activeProfile?.builtIn) {
+        state.className = activeProfile.name;
+        classNameInput.value = activeProfile.name;
+        getBuiltInClassOverrides()[activeProfile.id] = {
+          athletes: athleteNames,
+          updatedAt: new Date().toISOString()
+        };
+        save();
+        updateAll();
+        setStatus(activeProfile.name + " updated with " + athleteNames.length + " athlete" + (athleteNames.length === 1 ? "" : "s") + ".");
+        return;
+      }
+
       const savedClasses = getSavedClasses();
-      const existing = savedClasses.find((profile) => profile.name.toLowerCase() === name.toLowerCase());
+      const existing = (activeProfile && !activeProfile.builtIn
+        ? savedClasses.find((profile) => profile.id === activeProfile.id)
+        : null) || savedClasses.find((profile) => profile.name.toLowerCase() === name.toLowerCase());
       const profile = {
         id: existing ? existing.id : makeId(),
         name,
@@ -4512,14 +4580,16 @@
       } else {
         savedClasses.push(profile);
       }
+      state.activeClassProfileId = profile.id;
       save();
       updateAll();
       setStatus(name + " saved with " + athleteNames.length + " athlete" + (athleteNames.length === 1 ? "" : "s") + ".");
     }
 
-    function loadClassProfile(id) {
+    function loadClassProfile(id, { editing = false } = {}) {
       const profile = getClassProfileById(id);
       if (!profile) return;
+      state.activeClassProfileId = profile.id;
       state.className = profile.name;
       state.athletes = profile.athletes.map(makeAthleteFromName).filter((athlete) => athlete.name);
       state.activeAthleteId = state.athletes[0] ? state.athletes[0].id : null;
@@ -4539,7 +4609,14 @@
       syncInputsFromState();
       save();
       updateAll();
-      setStatus(profile.name + " loaded.");
+      setStatus(editing
+        ? "Editing " + profile.name + ". Add or remove athletes, then save class."
+        : profile.name + " loaded.");
+      if (editing) athleteNameInput.focus();
+    }
+
+    function editClassProfile(id) {
+      loadClassProfile(id, { editing: true });
     }
 
     function deleteClassProfile(id) {
@@ -4549,6 +4626,7 @@
         return;
       }
       state.savedClasses = getSavedClasses().filter((item) => item.id !== id);
+      if (state.activeClassProfileId === id) state.activeClassProfileId = null;
       save();
       updateAll();
       setStatus(profile ? profile.name + " deleted." : "Class deleted.");
@@ -4836,7 +4914,7 @@
         lines.push("");
         if (isShuffleMode) {
           const shuffleRows = getShufflePointRows();
-          lines.push("## Shuffle Points");
+          lines.push("## Individual Points from Team Wins");
           lines.push("");
           lines.push("| Rank | Athlete | Points | Winning Rounds |");
           lines.push("| ---: | --- | ---: | --- |");
@@ -4846,7 +4924,7 @@
           const wins = getShuffleWins();
           if (wins.length) {
             lines.push("");
-            lines.push("| Event | Winning Team | Kids Awarded +1 |");
+            lines.push("| Event | Winning Team | Athletes Awarded +1 |");
             lines.push("| --- | --- | --- |");
             wins.forEach((record) => {
               lines.push("| " + record.eventLabel + " | " + record.winners.map((team) => team.name + " " + formatScore(team.total)).join(", ") + " | " + record.awardedNames.join(", ") + " |");
@@ -4972,6 +5050,7 @@
       const button = event.target.closest("button[data-class-action]");
       if (!button) return;
       if (button.dataset.classAction === "load") loadClassProfile(button.dataset.id);
+      if (button.dataset.classAction === "edit") editClassProfile(button.dataset.id);
       if (button.dataset.classAction === "delete") deleteClassProfile(button.dataset.id);
     });
 
