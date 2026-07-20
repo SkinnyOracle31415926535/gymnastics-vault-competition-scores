@@ -1863,6 +1863,27 @@
       </div>
     </section>
 
+    <section id="classManagerModal" class="event-picker-modal" role="dialog" aria-modal="true" aria-labelledby="classManagerTitle" hidden>
+      <div class="event-picker-card">
+        <div id="classManagerTitle" class="event-picker-title">edit classes</div>
+        <div id="classProfileList" class="class-profile-list"></div>
+        <div id="classProfileEmpty" class="empty">no classes yet</div>
+        <button id="classManagerClose" type="button" class="event-picker-cancel secondary">done</button>
+      </div>
+    </section>
+
+    <section id="newClassModal" class="event-picker-modal" role="dialog" aria-modal="true" aria-labelledby="newClassTitle" hidden>
+      <div class="event-picker-card">
+        <div id="newClassTitle" class="event-picker-title">new class</div>
+        <label for="newClassName">class name</label>
+        <input id="newClassName" autocomplete="off" placeholder="Class name">
+        <div class="toolbar">
+          <button id="createClass" type="button">create class</button>
+          <button id="newClassCancel" type="button" class="secondary">cancel</button>
+        </div>
+      </div>
+    </section>
+
     <section id="judgingMode" class="judging-screen" aria-label="Judging mode" hidden>
       <header class="game-header">
         <div id="judgingScreenTitle" class="game-title">competition</div>
@@ -2034,11 +2055,10 @@
         <section class="panel">
           <div class="panel-title">classes</div>
           <div class="toolbar class-actions-toolbar">
-            <button id="saveClassProfile" type="button" class="secondary">save class</button>
+            <button id="saveClassProfile" type="button" class="secondary">edit classes</button>
             <button id="newClassProfile" type="button" class="secondary">new class</button>
           </div>
-          <div id="classProfileList" class="class-profile-list"></div>
-          <div id="classProfileEmpty" class="empty">save a class to keep its roster</div>
+          <div id="activeClassHint" class="empty compact">choose or create a class to save its roster automatically</div>
         </section>
       </div>
 
@@ -2105,52 +2125,6 @@
       { id: "p-bars", label: "P Bars", aliases: ["p bars", "pbars", "p-bars", "parallel bars", "pb"] },
       { id: "highbar", label: "Highbar", aliases: ["highbar", "high bar", "hb"] }
     ];
-    const BUILT_IN_CLASS_PROFILES = [
-      {
-        id: "roll-l3",
-        name: "Boys Level 3",
-        source: "roll",
-        builtIn: true,
-        athletes: [
-          "Fabian Fernandes",
-          "Ethan Grinberg",
-          "Weston Schomaker",
-          "Daniel Shatil",
-          "Ariel Shatil"
-        ]
-      },
-      {
-        id: "roll-l4",
-        name: "Boys Level 4",
-        source: "roll",
-        builtIn: true,
-        athletes: [
-          "Maksim Bychkov",
-          "Jace Jackson",
-          "Aarush Kini",
-          "Owen Lavrich",
-          "Kaleb Jax Muolic",
-          "Uladzislau Samoilenka"
-        ]
-      },
-      {
-        id: "roll-nga",
-        name: "Boys NGA",
-        source: "roll",
-        builtIn: true,
-        athletes: [
-          "Benjamin Bowie Christopher",
-          "Kenneth Chan",
-          "Maxon Edington",
-          "Cody Goodman",
-          "Zayd Lakhani",
-          "Adam Pagsolingan",
-          "Ryan Pagsolingan",
-          "Oliver Rodriguez"
-        ]
-      }
-    ];
-
     const classNameInput = document.getElementById("className");
     const meetNameInput = document.getElementById("meetName");
     const scoreDateInput = document.getElementById("scoreDate");
@@ -2159,10 +2133,17 @@
     const resetClassButton = document.getElementById("resetClass");
     const saveClassProfileButton = document.getElementById("saveClassProfile");
     const newClassProfileButton = document.getElementById("newClassProfile");
+    const activeClassHint = document.getElementById("activeClassHint");
     const rosterList = document.getElementById("rosterList");
     const rosterEmpty = document.getElementById("rosterEmpty");
     const classProfileList = document.getElementById("classProfileList");
     const classProfileEmpty = document.getElementById("classProfileEmpty");
+    const classManagerModal = document.getElementById("classManagerModal");
+    const classManagerClose = document.getElementById("classManagerClose");
+    const newClassModal = document.getElementById("newClassModal");
+    const newClassNameInput = document.getElementById("newClassName");
+    const createClassButton = document.getElementById("createClass");
+    const newClassCancel = document.getElementById("newClassCancel");
     const status = document.getElementById("status");
     const modePickerModal = document.getElementById("modePickerModal");
     const chooseIndividualModeButton = document.getElementById("chooseIndividualMode");
@@ -2288,7 +2269,6 @@
           raw: ""
         },
         savedClasses: [],
-        builtInClassOverrides: {},
         teamPoints: {
           teamCount: 2,
           mode: "shuffle",
@@ -2491,25 +2471,14 @@
       };
     }
 
-    function normalizeBuiltInClassOverrides(overrides) {
-      const normalized = {};
-      if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return normalized;
-
-      BUILT_IN_CLASS_PROFILES.forEach((profile) => {
-        const rawOverride = overrides[profile.id];
-        if (!rawOverride || typeof rawOverride !== "object") return;
-        const athletes = uniqueNames(
-          Array.isArray(rawOverride.athletes)
-            ? rawOverride.athletes.map((athlete) => cleanText(typeof athlete === "string" ? athlete : athlete && athlete.name))
-            : []
-        );
-        normalized[profile.id] = {
-          athletes,
-          updatedAt: typeof rawOverride.updatedAt === "string" ? rawOverride.updatedAt : new Date().toISOString()
-        };
-      });
-
-      return normalized;
+    function syncActiveClassProfile() {
+      const profile = state.activeClassProfileId
+        ? getSavedClasses().find((item) => item.id === state.activeClassProfileId)
+        : null;
+      if (!profile) return;
+      profile.name = state.className || profile.name;
+      profile.athletes = state.athletes.map((athlete) => athlete.name).filter(Boolean);
+      profile.updatedAt = new Date().toISOString();
     }
 
     function normalizeTeamPointTeam(rawTeam, index) {
@@ -2585,6 +2554,7 @@
 
     function save() {
       try {
+        syncActiveClassProfile();
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       } catch (error) {
         setStatus("Local save unavailable.");
@@ -2657,7 +2627,6 @@
       state.savedClasses = Array.isArray(saved.savedClasses)
         ? saved.savedClasses.map(normalizeSavedClass).filter(Boolean)
         : [];
-      state.builtInClassOverrides = normalizeBuiltInClassOverrides(saved.builtInClassOverrides);
       const savedProfileId = typeof saved.activeClassProfileId === "string" ? saved.activeClassProfileId : "";
       state.activeClassProfileId = getClassProfileById(savedProfileId) ? savedProfileId : null;
       state.teamPoints = {
@@ -3494,24 +3463,8 @@
       return state.savedClasses;
     }
 
-    function getBuiltInClassOverrides() {
-      if (!state.builtInClassOverrides || typeof state.builtInClassOverrides !== "object" || Array.isArray(state.builtInClassOverrides)) {
-        state.builtInClassOverrides = {};
-      }
-      return state.builtInClassOverrides;
-    }
-
     function getAllClassProfiles() {
-      const overrides = getBuiltInClassOverrides();
-      const builtInProfiles = BUILT_IN_CLASS_PROFILES.map((profile) => {
-        const override = overrides[profile.id];
-        return {
-          ...profile,
-          athletes: (override ? override.athletes : profile.athletes).slice(),
-          edited: Boolean(override)
-        };
-      });
-      return builtInProfiles.concat(getSavedClasses());
+      return getSavedClasses();
     }
 
     function getClassProfileById(id) {
@@ -3522,10 +3475,14 @@
       const classProfiles = getAllClassProfiles();
       classProfileList.innerHTML = "";
       classProfileEmpty.style.display = classProfiles.length ? "none" : "grid";
+      const activeProfile = state.activeClassProfileId ? getClassProfileById(state.activeClassProfileId) : null;
+      activeClassHint.textContent = activeProfile
+        ? "editing " + activeProfile.name + " - roster saves automatically"
+        : "choose or create a class to save its roster automatically";
 
       classProfiles.forEach((profile) => {
         const row = document.createElement("div");
-        row.className = "class-profile-row" + (profile.builtIn ? " is-built-in" : "");
+        row.className = "class-profile-row";
 
         const name = document.createElement("div");
         name.className = "class-profile-name";
@@ -3534,8 +3491,7 @@
         const meta = document.createElement("span");
         meta.className = "class-profile-meta";
         const count = Array.isArray(profile.athletes) ? profile.athletes.length : 0;
-        const sourceLabel = profile.edited ? "edited roll" : profile.builtIn ? "roll" : "saved";
-        meta.textContent = count + " athlete" + (count === 1 ? "" : "s") + " - " + sourceLabel;
+        meta.textContent = count + " athlete" + (count === 1 ? "" : "s");
         name.appendChild(meta);
 
         const loadButton = document.createElement("button");
@@ -3548,15 +3504,16 @@
         const editButton = document.createElement("button");
         editButton.type = "button";
         editButton.className = "small-button secondary";
-        editButton.textContent = "edit";
+        editButton.textContent = "edit roster";
         editButton.dataset.classAction = "edit";
         editButton.dataset.id = profile.id;
 
-        if (profile.builtIn) {
-          row.append(name, loadButton, editButton);
-          classProfileList.appendChild(row);
-          return;
-        }
+        const renameButton = document.createElement("button");
+        renameButton.type = "button";
+        renameButton.className = "small-button secondary";
+        renameButton.textContent = "rename";
+        renameButton.dataset.classAction = "rename";
+        renameButton.dataset.id = profile.id;
 
         const deleteButton = document.createElement("button");
         deleteButton.type = "button";
@@ -3565,7 +3522,7 @@
         deleteButton.dataset.classAction = "delete";
         deleteButton.dataset.id = profile.id;
 
-        row.append(name, loadButton, editButton, deleteButton);
+        row.append(name, loadButton, editButton, renameButton, deleteButton);
         classProfileList.appendChild(row);
       });
     }
@@ -4602,14 +4559,52 @@
       resetClassButton.textContent = "reset class";
       window.clearTimeout(resetClassTimer);
       const savedClasses = getSavedClasses();
-      const builtInClassOverrides = getBuiltInClassOverrides();
       state = createDefaultState();
       state.savedClasses = savedClasses;
-      state.builtInClassOverrides = builtInClassOverrides;
       syncInputsFromState();
       save();
       updateAll();
       setStatus("Class reset.");
+    }
+
+    function startNewClass() {
+      newClassNameInput.value = "";
+      newClassModal.hidden = false;
+      window.setTimeout(() => newClassNameInput.focus(), 0);
+    }
+
+    function closeNewClass() {
+      newClassModal.hidden = true;
+      newClassNameInput.value = "";
+    }
+
+    function createNewClass() {
+      const name = cleanText(newClassNameInput.value);
+      if (!name) {
+        setStatus("Class name needed.");
+        newClassNameInput.focus();
+        return;
+      }
+      if (getSavedClasses().some((profile) => profile.name.toLowerCase() === name.toLowerCase())) {
+        setStatus("A class with that name already exists.");
+        newClassNameInput.focus();
+        return;
+      }
+      const profile = { id: makeId(), name, athletes: [], updatedAt: new Date().toISOString() };
+      getSavedClasses().push(profile);
+      state.activeClassProfileId = profile.id;
+      state.className = profile.name;
+      state.activeAthleteId = null;
+      state.athletes = [];
+      state.completedEventIds = [];
+      state.competition = { active: false, eventId: EVENTS[0].id, queue: [], completedIds: [] };
+      state.teamPoints = { teamCount: getTeamPointCount(), mode: getTeamPointMode(), teams: defaultTeamPointTeams(), shuffleWins: [] };
+      closeNewClass();
+      syncInputsFromState();
+      save();
+      updateAll();
+      setStatus(name + " created. Add athletes to build its roster.");
+      athleteNameInput.focus();
     }
 
     function resetCurrentClassRoster() {
@@ -4637,55 +4632,8 @@
     }
 
     function saveClassProfile() {
-      const activeProfile = state.activeClassProfileId ? getClassProfileById(state.activeClassProfileId) : null;
-      let name = cleanText(classNameInput.value || state.className || activeProfile?.name);
-      if (!name) {
-        const answer = window.prompt("Class name", "New class");
-        if (answer === null) {
-          setStatus("Class not saved.");
-          return;
-        }
-        name = cleanText(answer);
-        if (!name) {
-          setStatus("Class name needed before saving.");
-          return;
-        }
-      }
-      state.className = name;
-      classNameInput.value = name;
-      const athleteNames = state.athletes.map((athlete) => athlete.name).filter(Boolean);
-      if (activeProfile?.builtIn) {
-        state.className = activeProfile.name;
-        classNameInput.value = activeProfile.name;
-        getBuiltInClassOverrides()[activeProfile.id] = {
-          athletes: athleteNames,
-          updatedAt: new Date().toISOString()
-        };
-        save();
-        updateAll();
-        setStatus(activeProfile.name + " updated with " + athleteNames.length + " athlete" + (athleteNames.length === 1 ? "" : "s") + ".");
-        return;
-      }
-
-      const savedClasses = getSavedClasses();
-      const existing = (activeProfile && !activeProfile.builtIn
-        ? savedClasses.find((profile) => profile.id === activeProfile.id)
-        : null) || savedClasses.find((profile) => profile.name.toLowerCase() === name.toLowerCase());
-      const profile = {
-        id: existing ? existing.id : makeId(),
-        name,
-        athletes: athleteNames,
-        updatedAt: new Date().toISOString()
-      };
-      if (existing) {
-        Object.assign(existing, profile);
-      } else {
-        savedClasses.push(profile);
-      }
-      state.activeClassProfileId = profile.id;
-      save();
-      updateAll();
-      setStatus(name + " saved with " + athleteNames.length + " athlete" + (athleteNames.length === 1 ? "" : "s") + ".");
+      classManagerModal.hidden = false;
+      renderClassProfiles();
     }
 
     function loadClassProfile(id, { editing = false } = {}) {
@@ -4711,8 +4659,9 @@
       syncInputsFromState();
       save();
       updateAll();
+      classManagerModal.hidden = true;
       setStatus(editing
-        ? "Editing " + profile.name + ". Add or remove athletes, then save class."
+        ? "Editing " + profile.name + ". Roster changes save automatically."
         : profile.name + " loaded.");
       if (editing) athleteNameInput.focus();
     }
@@ -4721,12 +4670,34 @@
       loadClassProfile(id, { editing: true });
     }
 
-    function deleteClassProfile(id) {
+    function renameClassProfile(id) {
       const profile = getSavedClasses().find((item) => item.id === id);
-      if (!profile && getClassProfileById(id)) {
-        setStatus("Roll classes stay preloaded.");
+      if (!profile) return;
+      const answer = window.prompt("Class name", profile.name);
+      if (answer === null) return;
+      const name = cleanText(answer);
+      if (!name) {
+        setStatus("Class name needed.");
         return;
       }
+      if (getSavedClasses().some((item) => item.id !== id && item.name.toLowerCase() === name.toLowerCase())) {
+        setStatus("A class with that name already exists.");
+        return;
+      }
+      profile.name = name;
+      profile.updatedAt = new Date().toISOString();
+      if (state.activeClassProfileId === id) {
+        state.className = name;
+        syncInputsFromState();
+      }
+      save();
+      updateAll();
+      setStatus(name + " renamed.");
+    }
+
+    function deleteClassProfile(id) {
+      const profile = getSavedClasses().find((item) => item.id === id);
+      if (!profile) return;
       state.savedClasses = getSavedClasses().filter((item) => item.id !== id);
       if (state.activeClassProfileId === id) state.activeClassProfileId = null;
       save();
@@ -5153,6 +5124,7 @@
       if (!button) return;
       if (button.dataset.classAction === "load") loadClassProfile(button.dataset.id);
       if (button.dataset.classAction === "edit") editClassProfile(button.dataset.id);
+      if (button.dataset.classAction === "rename") renameClassProfile(button.dataset.id);
       if (button.dataset.classAction === "delete") deleteClassProfile(button.dataset.id);
     });
 
@@ -5289,7 +5261,10 @@
     });
 
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !eventPickerModal.hidden) closeEventPicker();
+      if (event.key !== "Escape") return;
+      if (!eventPickerModal.hidden) closeEventPicker();
+      if (!classManagerModal.hidden) classManagerModal.hidden = true;
+      if (!newClassModal.hidden) closeNewClass();
     });
 
     beginCompetitionButton.addEventListener("click", beginCompetition);
@@ -5312,7 +5287,21 @@
       if (event.key === "Enter") addAthleteFromInput(teamAthleteNameInput);
     });
     saveClassProfileButton.addEventListener("click", saveClassProfile);
-    newClassProfileButton.addEventListener("click", resetCurrentClassRoster);
+    newClassProfileButton.addEventListener("click", startNewClass);
+    classManagerClose.addEventListener("click", () => {
+      classManagerModal.hidden = true;
+    });
+    classManagerModal.addEventListener("click", (event) => {
+      if (event.target === classManagerModal) classManagerModal.hidden = true;
+    });
+    createClassButton.addEventListener("click", createNewClass);
+    newClassNameInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") createNewClass();
+    });
+    newClassCancel.addEventListener("click", closeNewClass);
+    newClassModal.addEventListener("click", (event) => {
+      if (event.target === newClassModal) closeNewClass();
+    });
     teamPointCountInput.addEventListener("change", () => {
       state.teamPoints.teamCount = normalizeTeamCount(teamPointCountInput.value);
       teamPointCountInput.value = String(state.teamPoints.teamCount);
